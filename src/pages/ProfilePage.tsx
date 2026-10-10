@@ -61,6 +61,7 @@ export function ProfilePage() {
         display_name: form.display_name?.trim() || undefined,
         about: form.about?.trim() || undefined,
         picture: form.picture?.trim() || undefined,
+        nip05: form.nip05?.trim() || undefined,
       });
       setProfile(form);
       setEditing(false);
@@ -145,6 +146,9 @@ export function ProfilePage() {
           displayProfile.name !== displayProfile.display_name && (
             <p className="text-sm text-solid-gray-600">@{displayProfile.name}</p>
           )}
+        {displayProfile.nip05 && (
+          <p className="mt-2 text-sm text-solid-gray-600">NIP-05: {displayProfile.nip05}</p>
+        )}
         {displayProfile.about && (
           <p className="mt-3 whitespace-pre-wrap break-words leading-7">{displayProfile.about}</p>
         )}
@@ -186,6 +190,27 @@ export function ProfilePage() {
               onChange={(event) => setForm({ ...form, name: event.target.value })}
               value={form.name ?? ""}
             />
+          </div>
+          <div>
+            <Label className="mb-2 block" htmlFor="nip05">
+              NIP-05 ID
+            </Label>
+            <Input
+              aria-describedby="nip05-help"
+              autoCapitalize="none"
+              autoCorrect="off"
+              id="nip05"
+              maxLength={256}
+              onChange={(event) => setForm({ ...form, nip05: event.target.value })}
+              spellCheck={false}
+              type="text"
+              value={form.nip05 ?? ""}
+            />
+            <p className="mt-2 text-sm leading-6 text-solid-gray-600" id="nip05-help">
+              例: alice@example.com。ドメインの /.well-known/nostr.json?name=alice
+              がこのアカウントの公開鍵を返すよう設定してください。CORSは
+              Access-Control-Allow-Origin: * にします。入力しただけでは確認されません。
+            </p>
           </div>
           <div>
             <Label className="mb-2 block" htmlFor="picture-url">

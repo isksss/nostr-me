@@ -60,6 +60,9 @@ describe("Nostr event helpers", () => {
       nip05: undefined,
       website: undefined,
     });
+    expect(parseProfile(JSON.stringify({ nip05: "alice@example.com" })).nip05).toBe(
+      "alice@example.com",
+    );
     expect(parseProfile("[]")).toEqual({});
     expect(parseProfile("invalid json")).toEqual({});
   });
