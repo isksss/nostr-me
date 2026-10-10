@@ -21,8 +21,9 @@ const event = (id: string, created_at: number, kind = 1): Event => ({
 });
 
 describe("relay settings", () => {
-  it("uses the popular defaults when no NIP-65 event exists", () => {
+  it("uses the defaults, including the Japanese relay, when no NIP-65 event exists", () => {
     const settings = parseRelayList();
+    expect(DEFAULT_RELAYS).toContain("wss://yabu.me");
     expect(settings.read).toEqual(DEFAULT_RELAYS);
     expect(settings.write).toEqual(DEFAULT_RELAYS);
     expect(settings.read).not.toBe(DEFAULT_RELAYS);

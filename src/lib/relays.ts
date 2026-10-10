@@ -4,6 +4,7 @@ export const DEFAULT_RELAYS = [
   "wss://relay.damus.io",
   "wss://nos.lol",
   "wss://relay.primal.net",
+  "wss://yabu.me",
 ] as const;
 
 export type RelaySettings = {

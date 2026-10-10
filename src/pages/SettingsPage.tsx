@@ -91,7 +91,7 @@ export function SettingsPage() {
           </Button>
         </form>
         <p className="mt-4 text-sm leading-6 text-solid-gray-600">
-          初期設定ではrelay.damus.io、nos.lol、relay.primal.netへ接続します。NIP-65のリレー一覧があるアカウントでは、その一覧が優先されます。
+          初期設定ではrelay.damus.io、nos.lol、relay.primal.net、日本語コミュニティのyabu.meへ接続します。NIP-65のリレー一覧があるアカウントでは、その一覧が優先されます。
         </p>
       </section>
       <section className="p-4 sm:p-6" aria-labelledby="privacy-title">

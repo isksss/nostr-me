@@ -36,7 +36,7 @@ For a fresh machine, install the Playwright browser once with `pnpm exec playwri
 
 ## Nostrの動作
 
-- 初期リレー（read/write）: `wss://relay.damus.io`、`wss://nos.lol`、`wss://relay.primal.net`
+- 初期リレー（read/write）: `wss://relay.damus.io`、`wss://nos.lol`、`wss://relay.primal.net`、日本語コミュニティの`wss://yabu.me`
 - アカウントにNIP-65リレー一覧があれば、そちらを優先します。設定済みNIP-65リレーにアプリ既定リレーを常時追加することはありません。
 - NIP-07署名拡張を接続すると投稿、返信、リアクション、リポスト、フォロー、プロフィール更新ができます。拡張がない場合は公開投稿を閲覧できます。
 - NIP-50対応リレーでは投稿・プロフィールを検索し、対応していない場合は現在取得済みの投稿をローカル検索します。
