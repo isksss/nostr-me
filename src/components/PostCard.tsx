@@ -34,10 +34,28 @@ function displayName(profile: Profile | undefined, pubkey: string): string {
   return profile?.display_name || profile?.name || publicKeyLabel(pubkey).slice(0, 16);
 }
 
-export function PostCard({ event }: { event: Event }) {
-  const { pubkey, profiles, reply, react, repost, setNotice } = useNostr();
+export function PostCard({ event, full = false }: { event: Event; full?: boolean }) {
+  const {
+    pubkey,
+    profiles,
+    reply,
+    react,
+    repost,
+    deletePost,
+    reportPost,
+    loadReplies,
+    reactionCounts,
+    setNotice,
+  } = useNostr();
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyText, setReplyText] = useState("");
+  const [threadOpen, setThreadOpen] = useState(false);
+  const [thread, setThread] = useState<Event[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [countsLoaded, setCountsLoaded] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportCategory, setReportCategory] = useState("spam");
+  const [deleted, setDeleted] = useState(false);
   const reposted = nestedEvent(event);
   const post = reposted ?? event;
   const author = profiles[post.pubkey];
@@ -62,6 +80,8 @@ export function PostCard({ event }: { event: Event }) {
       setNotice(error instanceof Error ? error.message : "操作に失敗しました。");
     }
   }
+
+  if (deleted) return null;
 
   return (
     <article className="border-b border-solid-gray-300 px-4 py-5 sm:px-6" aria-label="投稿">
@@ -95,9 +115,20 @@ export function PostCard({ event }: { event: Event }) {
               · {relativeTime(post.created_at)}
             </span>
           </div>
+          {post.kind === 30023 && (
+            <h2 className="mt-3 text-xl font-bold">
+              {post.tags.find((tag) => tag[0] === "title")?.[1] || "タイトルなし"}
+            </h2>
+          )}
           <p className="mt-2 whitespace-pre-wrap break-words text-[1rem] leading-7 text-solid-gray-900">
-            {post.content || "（本文なし）"}
+            {(post.kind === 30023 && !full ? post.content.slice(0, 800) : post.content) ||
+              "（本文なし）"}
           </p>
+          {post.kind === 30023 && !full && post.content.length > 800 && (
+            <Link className="mt-2 inline-block text-key-1000 underline" to={`/event/${post.id}`}>
+              記事を読む
+            </Link>
+          )}
           <div className="mt-3 flex flex-wrap gap-x-2 gap-y-1" aria-label="投稿への操作">
             <Button
               aria-label="返信"
@@ -110,6 +141,20 @@ export function PostCard({ event }: { event: Event }) {
               <span>返信</span>
             </Button>
             <Button
+              className="!min-w-0 !px-2"
+              onClick={() => {
+                setThreadOpen((open) => !open);
+                if (!thread.length)
+                  void loadReplies(post)
+                    .then(setThread)
+                    .catch(() => setNotice("返信を読み込めませんでした。"));
+              }}
+              size="xs"
+              variant="text"
+            >
+              返信を見る{thread.length ? ` (${thread.length})` : ""}
+            </Button>
+            <Button
               aria-label="いいね"
               className="gap-2 !min-w-0 !px-2"
               disabled={!pubkey}
@@ -118,7 +163,32 @@ export function PostCard({ event }: { event: Event }) {
               variant="text"
             >
               <Icon name="heart" size={18} />
-              <span>いいね</span>
+              <span>
+                {countsLoaded
+                  ? Object.values(counts).reduce((sum, count) => sum + count, 0)
+                  : "いいね"}
+              </span>
+            </Button>
+            <Button
+              aria-label="リアクション数"
+              className="!min-w-0 !px-2"
+              disabled={countsLoaded}
+              onClick={() =>
+                void reactionCounts(post.id)
+                  .then((next) => {
+                    setCounts(next);
+                    setCountsLoaded(true);
+                  })
+                  .catch(() => setNotice("リアクションを読み込めませんでした。"))
+              }
+              size="xs"
+              variant="text"
+            >
+              {countsLoaded
+                ? Object.entries(counts)
+                    .map(([emoji, count]) => `${emoji} ${count}`)
+                    .join(" · ") || "リアクションなし"
+                : "リアクション数"}
             </Button>
             <Button
               aria-label="リポスト"
@@ -131,7 +201,99 @@ export function PostCard({ event }: { event: Event }) {
               <Icon name="repost" size={18} />
               <span>リポスト</span>
             </Button>
+            {pubkey === post.pubkey && (
+              <Button
+                className="!min-w-0 !px-2"
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      "この投稿の削除リクエストを公開します。リレー上の削除は保証されません。続けますか？",
+                    )
+                  ) {
+                    void deletePost(post)
+                      .then(() => setDeleted(true))
+                      .catch((error) =>
+                        setNotice(
+                          error instanceof Error
+                            ? error.message
+                            : "削除リクエストを送れませんでした。",
+                        ),
+                      );
+                  }
+                }}
+                size="xs"
+                variant="text"
+              >
+                削除
+              </Button>
+            )}
+            <Button
+              className="!min-w-0 !px-2"
+              onClick={() => setReportOpen((open) => !open)}
+              size="xs"
+              variant="text"
+            >
+              報告
+            </Button>
           </div>
+          {reportOpen && (
+            <form
+              className="mt-3 flex flex-wrap items-center gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void reportPost(post, reportCategory)
+                  .then(() => {
+                    setReportOpen(false);
+                    setNotice("報告を送信しました。");
+                  })
+                  .catch((error) =>
+                    setNotice(
+                      error instanceof Error ? error.message : "報告を送信できませんでした。",
+                    ),
+                  );
+              }}
+            >
+              <label className="text-sm" htmlFor={`report-${post.id}`}>
+                報告理由
+              </label>
+              <select
+                className="min-h-10 rounded-4 border border-solid-gray-300 px-2"
+                id={`report-${post.id}`}
+                onChange={(event) => setReportCategory(event.target.value)}
+                value={reportCategory}
+              >
+                <option value="spam">スパム</option>
+                <option value="nudity">露骨な内容</option>
+                <option value="malware">マルウェア</option>
+                <option value="illegal">違法な内容</option>
+                <option value="impersonation">なりすまし</option>
+                <option value="profanity">不適切な表現</option>
+                <option value="other">その他</option>
+              </select>
+              <Button size="xs" type="submit" variant="outline">
+                報告を送信
+              </Button>
+            </form>
+          )}
+          {threadOpen && (
+            <div className="mt-3 border-l-2 border-solid-gray-300 pl-3" aria-label="返信一覧">
+              {thread.length ? (
+                thread.map((item) => (
+                  <p
+                    className="border-b border-solid-gray-200 py-2 text-sm leading-6"
+                    key={item.id}
+                  >
+                    <Link className="font-bold underline" to={`/profile/${item.pubkey}`}>
+                      {publicKeyLabel(item.pubkey).slice(0, 16)}
+                    </Link>
+                    <span className="ml-2 whitespace-pre-wrap break-words">{item.content}</span>
+                  </p>
+                ))
+              ) : (
+                <p className="py-2 text-sm text-solid-gray-600">返信はありません。</p>
+              )}
+            </div>
+          )}
           {replyOpen && (
             <form className="mt-3 space-y-3 border-l-4 border-key-300 pl-4" onSubmit={submitReply}>
               <label className="sr-only" htmlFor={`reply-${post.id}`}>

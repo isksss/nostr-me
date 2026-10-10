@@ -82,7 +82,7 @@ export function HomePage() {
             公開投稿を閲覧中
           </h2>
           <p className="mt-1 text-sm leading-6 text-solid-gray-700">
-            NIP-07署名拡張を接続すると、投稿やリアクションができます。秘密鍵はこのアプリに渡りません。
+            NIP-07署名拡張またはNIP-46署名サーバーを接続すると、投稿やリアクションができます。秘密鍵はこのアプリに渡りません。
           </p>
           <Button className="mt-3" onClick={() => void connect()} size="sm" variant="outline">
             署名拡張に接続

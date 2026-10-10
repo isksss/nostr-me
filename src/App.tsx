@@ -1,6 +1,11 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { HomePage } from "./pages/HomePage";
+import { EventPage } from "./pages/EventPage";
+import { ArticlesPage } from "./pages/ArticlesPage";
+import { ListsPage } from "./pages/ListsPage";
+import { MessagesPage } from "./pages/MessagesPage";
+import { ToolsPage } from "./pages/ToolsPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { SearchPage } from "./pages/SearchPage";
@@ -24,6 +29,11 @@ export function App() {
       <Route element={<AppShell />}>
         <Route index element={<HomePage />} />
         <Route path="search" element={<SearchPage />} />
+        <Route path="event/:identifier" element={<EventPage />} />
+        <Route path="tools" element={<ToolsPage />} />
+        <Route path="messages" element={<MessagesPage />} />
+        <Route path="articles" element={<ArticlesPage />} />
+        <Route path="lists" element={<ListsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="profile/:pubkey" element={<ProfilePage />} />

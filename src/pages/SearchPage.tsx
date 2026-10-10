@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useNostr } from "../context/NostrContext";
+import { decodeNostrIdentifier } from "../lib/nostr";
 import { Avatar } from "../components/Avatar";
 import { PostCard } from "../components/PostCard";
 import { Button } from "../components/dads/Button/Button";
@@ -10,6 +11,7 @@ import type { Event } from "nostr-tools";
 
 export function SearchPage() {
   const { profiles, search, relays, setNotice } = useNostr();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
   const [results, setResults] = useState<Event[]>([]);
@@ -19,6 +21,15 @@ export function SearchPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!query.trim()) return;
+    const identifier = decodeNostrIdentifier(query.trim());
+    if (identifier?.type === "profile") {
+      navigate(`/profile/${identifier.pubkey}`);
+      return;
+    }
+    if (identifier?.type === "event" || identifier?.type === "address") {
+      navigate(`/event/${encodeURIComponent(query.trim())}`);
+      return;
+    }
     setLoading(true);
     setSearched(true);
     setSearchParams({ q: query.trim() });
@@ -36,7 +47,7 @@ export function SearchPage() {
       results.filter((event) => event.kind === 0).map((event) => [event.pubkey, event]),
     ).values(),
   ];
-  const posts = results.filter((event) => event.kind === 1);
+  const posts = results.filter((event) => event.kind === 1 || event.kind === 30023);
 
   return (
     <>

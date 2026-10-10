@@ -8,20 +8,35 @@ import {
   type ReactNode,
 } from "react";
 import type { Event } from "nostr-tools";
+import { BunkerSigner, parseBunkerInput } from "nostr-tools/nip46";
+import { generateSecretKey } from "nostr-tools/pure";
 import {
+  deleteEvent,
   eventTemplate,
+  publishList,
+  publishLongForm,
+  publishNip04Message,
+  publishNip17Message,
+  readDirectMessages,
   readFollowing,
   readLatestEvent,
+  readLists,
   readNotifications,
   readProfile,
   readProfiles,
+  readReactionCounts,
+  readReplies,
   readTimeline,
   relayConnectionStatus,
   replyTags,
   repostTags,
+  reportEvent,
   searchEvents,
+  setRelayAuthSigner,
   signAndPublish,
   subscribeTimeline,
+  type DirectMessage,
+  type NostrSigner,
   type Profile,
   type PublishResult,
 } from "../lib/nostr";
@@ -39,6 +54,7 @@ type FeedMode = "global" | "following";
 
 type NostrContextValue = {
   pubkey: string | null;
+  signerKind: "nip07" | "nip46" | null;
   profile: Profile;
   profiles: Record<string, Profile>;
   relays: RelaySettings;
@@ -50,6 +66,7 @@ type NostrContextValue = {
   connectedCount: number;
   notice: string;
   connect: () => Promise<void>;
+  connectBunker: (input: string) => Promise<void>;
   disconnect: () => void;
   loadTimeline: (mode?: FeedMode, until?: number, append?: boolean) => Promise<void>;
   loadNotifications: () => Promise<void>;
@@ -60,6 +77,19 @@ type NostrContextValue = {
   repost: (event: Event) => Promise<PublishResult>;
   follow: (target: string, shouldFollow: boolean) => Promise<PublishResult>;
   updateProfile: (next: Profile) => Promise<PublishResult>;
+  deletePost: (event: Event) => Promise<PublishResult>;
+  reportPost: (event: Event, category: string) => Promise<PublishResult>;
+  publishArticle: (title: string, content: string) => Promise<PublishResult>;
+  savePeopleList: (title: string, members: string[]) => Promise<PublishResult>;
+  loadLists: () => Promise<Event[]>;
+  loadDirectMessages: () => Promise<DirectMessage[]>;
+  sendDirectMessage: (
+    recipient: string,
+    content: string,
+    legacy?: boolean,
+  ) => Promise<PublishResult>;
+  loadReplies: (event: Event) => Promise<Event[]>;
+  reactionCounts: (eventId: string) => Promise<Record<string, number>>;
   saveRelays: (next: RelaySettings) => Promise<PublishResult | undefined>;
   setNotice: (message: string) => void;
 };
@@ -103,6 +133,10 @@ async function fetchFeed(
 
 export function NostrProvider({ children }: { children: ReactNode }) {
   const [pubkey, setPubkey] = useState<string | null>(null);
+  const [signer, setSigner] = useState<(NostrSigner & { close?: () => Promise<void> }) | null>(
+    null,
+  );
+  const [signerKind, setSignerKind] = useState<"nip07" | "nip46" | null>(null);
   const [profile, setProfile] = useState<Profile>({});
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [relays, setRelays] = useState<RelaySettings>(readSavedSettings);
@@ -164,7 +198,14 @@ export function NostrProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const authors = feedMode === "following" && pubkey ? following : undefined;
     const subscription = subscribeTimeline(relays.read, authors, (event) => {
-      setEvents((current) => mergeEvents([event, ...current]));
+      if (event.kind === 5) {
+        const deleted = new Set(event.tags.filter((tag) => tag[0] === "e").map((tag) => tag[1]));
+        setEvents((current) =>
+          current.filter((item) => item.pubkey !== event.pubkey || !deleted.has(item.id)),
+        );
+      } else {
+        setEvents((current) => mergeEvents([event, ...current]));
+      }
       setConnectedCount(getConnectedCount(relays.read));
     });
     return () => {
@@ -172,45 +213,107 @@ export function NostrProvider({ children }: { children: ReactNode }) {
     };
   }, [feedMode, following, pubkey, relays.read, updateProfiles]);
 
+  const connectWithSigner = useCallback(
+    async (nextSigner: NostrSigner & { close?: () => Promise<void> }, kind: "nip07" | "nip46") => {
+      setLoading(true);
+      setNotice("");
+      try {
+        const key = (await nextSigner.getPublicKey()).toLowerCase();
+        if (!/^[0-9a-f]{64}$/i.test(key)) throw new Error("公開鍵の形式が正しくありません。");
+        setRelayAuthSigner(nextSigner);
+        const [nip65Event, nextProfile, nextFollowing] = await Promise.all([
+          readLatestEvent(DEFAULT_RELAYS.slice(), { authors: [key], kinds: [10002] }),
+          readProfile(key, DEFAULT_RELAYS.slice()),
+          readFollowing(key, DEFAULT_RELAYS.slice()),
+        ]);
+        const nextRelays = nip65Event
+          ? parseRelayList(nip65Event, import.meta.env.DEV)
+          : readSavedSettings();
+        const nextMode: FeedMode = nextFollowing.length ? "following" : "global";
+        setSigner(nextSigner);
+        setSignerKind(kind);
+        setPubkey(key);
+        setProfile(nextProfile);
+        setProfiles((current) => ({ ...current, [key]: nextProfile }));
+        setFollowing(nextFollowing);
+        setRelays(nextRelays);
+        const nextEvents = await fetchFeed(nextRelays, nextMode, key, nextFollowing);
+        setEvents(nextEvents);
+        setFeedMode(nextMode);
+        await updateProfiles(nextEvents, nextRelays.read);
+        setConnectedCount(getConnectedCount(nextRelays.read));
+        setNotice(
+          kind === "nip07" ? "署名拡張に接続しました。" : "NIP-46署名サーバーに接続しました。",
+        );
+      } catch (error) {
+        setRelayAuthSigner(undefined);
+        await nextSigner.close?.();
+        setNotice(error instanceof Error ? error.message : "接続できませんでした。");
+        throw error;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [updateProfiles],
+  );
+
   const connect = useCallback(async () => {
     if (!window.nostr) {
-      setNotice("NIP-07対応の署名拡張をインストールしてください。閲覧はこのまま利用できます。");
+      setNotice(
+        "NIP-07対応の署名拡張をインストールしてください。NIP-46接続情報でもログインできます。閲覧はこのまま利用できます。",
+      );
       return;
     }
-    setLoading(true);
-    setNotice("");
     try {
-      const key = (await window.nostr.getPublicKey()).toLowerCase();
-      if (!/^[0-9a-f]{64}$/i.test(key)) throw new Error("公開鍵の形式が正しくありません。");
-      const [nip65Event, nextProfile, nextFollowing] = await Promise.all([
-        readLatestEvent(DEFAULT_RELAYS.slice(), { authors: [key], kinds: [10002] }),
-        readProfile(key, DEFAULT_RELAYS.slice()),
-        readFollowing(key, DEFAULT_RELAYS.slice()),
-      ]);
-      const nextRelays = nip65Event
-        ? parseRelayList(nip65Event, import.meta.env.DEV)
-        : readSavedSettings();
-      const nextMode: FeedMode = nextFollowing.length ? "following" : "global";
-      setPubkey(key);
-      setProfile(nextProfile);
-      setProfiles((current) => ({ ...current, [key]: nextProfile }));
-      setFollowing(nextFollowing);
-      setRelays(nextRelays);
-      const nextEvents = await fetchFeed(nextRelays, nextMode, key, nextFollowing);
-      setEvents(nextEvents);
-      setFeedMode(nextMode);
-      await updateProfiles(nextEvents, nextRelays.read);
-      setConnectedCount(getConnectedCount(nextRelays.read));
-      setNotice("署名拡張に接続しました。");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "接続できませんでした。");
-    } finally {
-      setLoading(false);
+      await connectWithSigner(window.nostr, "nip07");
+    } catch {
+      // The connection error is already shown in the app notice.
     }
-  }, [updateProfiles]);
+  }, [connectWithSigner]);
+
+  const connectBunker = useCallback(
+    async (input: string) => {
+      if (input.length > 2_048) throw new Error("NIP-46接続情報は2,048文字以内にしてください。");
+      const pointer = await parseBunkerInput(input.trim());
+      if (!pointer) throw new Error("bunker:// URLまたはNIP-05接続先を確認してください。");
+      if (!/^[0-9a-f]{64}$/i.test(pointer.pubkey))
+        throw new Error("NIP-46公開鍵の形式が正しくありません。");
+      pointer.relays = [...new Set(pointer.relays.map((url) => normalizeRelayUrl(url)))];
+      if (!pointer.relays.length) throw new Error("NIP-46接続先リレーがありません。");
+      if (pointer.relays.length > 8) throw new Error("NIP-46リレーは8局まで指定できます。");
+      const bunker = BunkerSigner.fromBunker(generateSecretKey(), pointer);
+      try {
+        await bunker.connect({ name: "nostr.me", url: window.location.origin });
+        await connectWithSigner(
+          {
+            getPublicKey: () => bunker.getPublicKey(),
+            signEvent: (event) => bunker.signEvent(event),
+            nip04: {
+              encrypt: (pubkey, plaintext) => bunker.nip04Encrypt(pubkey, plaintext),
+              decrypt: (pubkey, ciphertext) => bunker.nip04Decrypt(pubkey, ciphertext),
+            },
+            nip44: {
+              encrypt: (pubkey, plaintext) => bunker.nip44Encrypt(pubkey, plaintext),
+              decrypt: (pubkey, ciphertext) => bunker.nip44Decrypt(pubkey, ciphertext),
+            },
+            close: () => bunker.close(),
+          },
+          "nip46",
+        );
+      } catch (error) {
+        await bunker.close();
+        throw error;
+      }
+    },
+    [connectWithSigner],
+  );
 
   const disconnect = useCallback(() => {
     const nextRelays = readSavedSettings();
+    void signer?.close?.();
+    setRelayAuthSigner(undefined);
+    setSigner(null);
+    setSignerKind(null);
     setPubkey(null);
     setProfile({});
     setFollowing([]);
@@ -223,7 +326,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       .then(setEvents)
       .catch(() => setNotice("リレーに接続できませんでした。"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [signer]);
 
   const loadNotifications = useCallback(async () => {
     if (!pubkey) return;
@@ -253,7 +356,12 @@ export function NostrProvider({ children }: { children: ReactNode }) {
   const publish = useCallback(
     async (content: string) => {
       if (!pubkey) throw new Error("投稿するには署名拡張へ接続してください。");
-      const result = await signAndPublish(pubkey, relays.write, eventTemplate(pubkey, 1, content));
+      const result = await signAndPublish(
+        pubkey,
+        relays.write,
+        eventTemplate(pubkey, 1, content),
+        signer ?? undefined,
+      );
       await loadTimeline(feedMode);
       setNotice(
         result.failed
@@ -262,7 +370,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       );
       return result;
     },
-    [feedMode, loadTimeline, pubkey, relays.write],
+    [feedMode, loadTimeline, pubkey, relays.write, signer],
   );
 
   const reply = useCallback(
@@ -272,13 +380,14 @@ export function NostrProvider({ children }: { children: ReactNode }) {
         pubkey,
         relays.write,
         eventTemplate(pubkey, 1, content, replyTags(parent)),
+        signer ?? undefined,
       );
       setNotice(
         result.failed ? "返信しました。一部のリレーには届きませんでした。" : "返信しました。",
       );
       return result;
     },
-    [pubkey, relays.write],
+    [pubkey, relays.write, signer],
   );
 
   const react = useCallback(
@@ -291,13 +400,14 @@ export function NostrProvider({ children }: { children: ReactNode }) {
           ["e", event.id],
           ["p", event.pubkey],
         ]),
+        signer ?? undefined,
       );
       setNotice(
         result.failed ? "いいねしました。一部のリレーには届きませんでした。" : "いいねしました。",
       );
       return result;
     },
-    [pubkey, relays.write],
+    [pubkey, relays.write, signer],
   );
 
   const repost = useCallback(
@@ -307,6 +417,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
         pubkey,
         relays.write,
         eventTemplate(pubkey, 6, JSON.stringify(event), repostTags(event)),
+        signer ?? undefined,
       );
       setNotice(
         result.failed
@@ -315,7 +426,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       );
       return result;
     },
-    [pubkey, relays.write],
+    [pubkey, relays.write, signer],
   );
 
   const follow = useCallback(
@@ -340,6 +451,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
           ...otherTags,
           ...contacts.values(),
         ]),
+        signer ?? undefined,
       );
       const next = [...contacts.keys()];
       setFollowing(next);
@@ -362,7 +474,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       );
       return result;
     },
-    [feedMode, pubkey, relays, updateProfiles],
+    [feedMode, pubkey, relays, signer, updateProfiles],
   );
 
   const updateProfile = useCallback(
@@ -372,13 +484,84 @@ export function NostrProvider({ children }: { children: ReactNode }) {
         pubkey,
         relays.write,
         eventTemplate(pubkey, 0, JSON.stringify(next)),
+        signer ?? undefined,
       );
       setProfile(next);
       setProfiles((current) => ({ ...current, [pubkey]: next }));
       setNotice("プロフィールを更新しました。");
       return result;
     },
-    [pubkey, relays.write],
+    [pubkey, relays.write, signer],
+  );
+
+  const deletePost = useCallback(
+    async (event: Event) => {
+      if (!pubkey || !signer) throw new Error("削除するには署名者へ接続してください。");
+      const result = await deleteEvent(event, pubkey, relays.write, signer);
+      setEvents((current) => current.filter((item) => item.id !== event.id));
+      setNotice("削除リクエストをリレーへ送信しました。リレー上の削除は保証されません。");
+      return result;
+    },
+    [pubkey, relays.write, signer],
+  );
+
+  const reportPost = useCallback(
+    async (event: Event, category: string) => {
+      if (!pubkey || !signer) throw new Error("報告するには署名者へ接続してください。");
+      return reportEvent(event, category, pubkey, relays.write, signer);
+    },
+    [pubkey, relays.write, signer],
+  );
+
+  const publishArticle = useCallback(
+    async (title: string, content: string) => {
+      if (!pubkey || !signer) throw new Error("記事を公開するには署名者へ接続してください。");
+      const result = await publishLongForm(pubkey, title, content, relays.write, signer);
+      setNotice(
+        result.failed
+          ? "記事を公開しました。一部のリレーに届きませんでした。"
+          : "記事を公開しました。",
+      );
+      return result;
+    },
+    [pubkey, relays.write, signer],
+  );
+
+  const savePeopleList = useCallback(
+    async (title: string, members: string[]) => {
+      if (!pubkey || !signer) throw new Error("リストを公開するには署名者へ接続してください。");
+      const result = await publishList(pubkey, title, members, relays.write, signer);
+      setNotice("公開リストを保存しました。");
+      return result;
+    },
+    [pubkey, relays.write, signer],
+  );
+
+  const loadLists = useCallback(async () => {
+    if (!pubkey) return [];
+    return readLists(pubkey, relays.read);
+  }, [pubkey, relays.read]);
+
+  const loadDirectMessages = useCallback(async () => {
+    if (!pubkey || !signer) throw new Error("DMを見るには署名者へ接続してください。");
+    return readDirectMessages(pubkey, relays.read, signer);
+  }, [pubkey, relays.read, signer]);
+
+  const sendDirectMessage = useCallback(
+    async (recipient: string, content: string, legacy = false) => {
+      if (!pubkey || !signer) throw new Error("DMを送るには署名者へ接続してください。");
+      return legacy
+        ? publishNip04Message(recipient, content, relays.write, signer, pubkey)
+        : publishNip17Message(pubkey, recipient, content, relays.write, signer);
+    },
+    [pubkey, relays.write, signer],
+  );
+
+  const loadReplies = useCallback((event: Event) => readReplies(event, relays.read), [relays.read]);
+
+  const reactionCounts = useCallback(
+    (eventId: string) => readReactionCounts(eventId, relays.read),
+    [relays.read],
   );
 
   const saveRelays = useCallback(
@@ -397,6 +580,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
           pubkey,
           destinations,
           eventTemplate(pubkey, 10002, "", makeRelayTags(normalized)),
+          signer ?? undefined,
         );
       } else {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
@@ -423,12 +607,13 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       );
       return result;
     },
-    [feedMode, following, pubkey, relays.write, updateProfiles],
+    [feedMode, following, pubkey, relays.write, signer, updateProfiles],
   );
 
   const value = useMemo<NostrContextValue>(
     () => ({
       pubkey,
+      signerKind,
       profile,
       profiles,
       relays,
@@ -440,6 +625,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       connectedCount,
       notice,
       connect,
+      connectBunker,
       disconnect,
       loadTimeline,
       loadNotifications,
@@ -450,12 +636,23 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       repost,
       follow,
       updateProfile,
+      deletePost,
+      reportPost,
+      publishArticle,
+      savePeopleList,
+      loadLists,
+      loadDirectMessages,
+      sendDirectMessage,
+      loadReplies,
+      reactionCounts,
       saveRelays,
       setNotice,
     }),
     [
       connectedCount,
       connect,
+      connectBunker,
+      deletePost,
       disconnect,
       events,
       feedMode,
@@ -470,12 +667,21 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       profiles,
       pubkey,
       publish,
+      publishArticle,
       react,
+      reactionCounts,
+      reportPost,
       relays,
       reply,
       repost,
       saveRelays,
+      savePeopleList,
       search,
+      sendDirectMessage,
+      loadDirectMessages,
+      loadLists,
+      loadReplies,
+      signerKind,
       updateProfile,
     ],
   );

@@ -8,7 +8,14 @@ import { Input } from "../components/dads/Input/Input";
 import { Label } from "../components/dads/Label/Label";
 import { Textarea } from "../components/dads/Textarea/Textarea";
 import { useNostr } from "../context/NostrContext";
-import { publicKeyLabel, readProfile, readTimeline, type Profile } from "../lib/nostr";
+import {
+  decodeNostrIdentifier,
+  publicKeyLabel,
+  readProfile,
+  readTimeline,
+  verifyNip05,
+  type Profile,
+} from "../lib/nostr";
 
 export function ProfilePage() {
   const { pubkey: routePubkey } = useParams();
@@ -23,13 +30,18 @@ export function ProfilePage() {
     updateProfile,
     setNotice,
   } = useNostr();
-  const target = (routePubkey ?? pubkey ?? "").toLowerCase();
+  const rawTarget = routePubkey ?? pubkey ?? "";
+  const decodedTarget = decodeNostrIdentifier(rawTarget);
+  const target = (
+    decodedTarget?.type === "profile" ? decodedTarget.pubkey : rawTarget
+  ).toLowerCase();
   const isOwn = Boolean(pubkey && target === pubkey);
   const [profile, setProfile] = useState<Profile>({});
   const [posts, setPosts] = useState<Event[]>([]);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<Profile>({});
+  const [nip05Valid, setNip05Valid] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (!/^[0-9a-f]{64}$/i.test(target)) return;
@@ -75,7 +87,7 @@ export function ProfilePage() {
       <section className="px-6 py-12 text-center">
         <h1 className="text-2xl font-bold">プロフィール</h1>
         <p className="mt-2 text-solid-gray-700">
-          公開プロフィールを見るにはNIP-07署名拡張に接続してください。
+          自分のプロフィールを見るにはNIP-07署名拡張またはNIP-46署名サーバーに接続してください。
         </p>
         <Button className="mt-4" onClick={() => void connect()} size="sm" variant="solid-fill">
           署名拡張に接続
@@ -91,6 +103,19 @@ export function ProfilePage() {
 
   const displayProfile = isOwn ? ownProfile : (profiles[target] ?? profile);
   const followingTarget = following.includes(target);
+
+  useEffect(() => {
+    let current = true;
+    setNip05Valid(null);
+    if (displayProfile.nip05) {
+      void verifyNip05(target, displayProfile.nip05).then((valid) => {
+        if (current) setNip05Valid(valid);
+      });
+    }
+    return () => {
+      current = false;
+    };
+  }, [displayProfile.nip05, target]);
   let website: string | undefined;
   try {
     const url = new URL(displayProfile.website ?? "");
@@ -147,7 +172,10 @@ export function ProfilePage() {
             <p className="text-sm text-solid-gray-600">@{displayProfile.name}</p>
           )}
         {displayProfile.nip05 && (
-          <p className="mt-2 text-sm text-solid-gray-600">NIP-05: {displayProfile.nip05}</p>
+          <p className="mt-2 text-sm text-solid-gray-600">
+            NIP-05: {displayProfile.nip05} ·{" "}
+            {nip05Valid === null ? "確認中" : nip05Valid ? "確認済み" : "確認できません"}
+          </p>
         )}
         {displayProfile.about && (
           <p className="mt-3 whitespace-pre-wrap break-words leading-7">{displayProfile.about}</p>

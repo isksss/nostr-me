@@ -43,9 +43,7 @@ export function NotificationsPage() {
       {!pubkey ? (
         <section className="px-6 py-12 text-center">
           <h2 className="text-lg font-bold">通知を見るには接続してください</h2>
-          <p className="mt-2 text-sm text-solid-gray-600">
-            NIP-07署名拡張を使って公開鍵を確認します。
-          </p>
+          <p className="mt-2 text-sm text-solid-gray-600">署名者を使って公開鍵を確認します。</p>
           <Button className="mt-4" onClick={() => void connect()} size="sm" variant="solid-fill">
             署名拡張に接続
           </Button>

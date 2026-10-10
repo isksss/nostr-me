@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { Event } from "nostr-tools";
-import { eventTemplate, parseProfile, publicKeyLabel, replyTags, repostTags } from "./nostr";
+import { nip19, type Event } from "nostr-tools";
+import { getEventHash } from "nostr-tools/pure";
+import {
+  decodeNostrIdentifier,
+  deletionTags,
+  eventTemplate,
+  parseProfile,
+  publicKeyLabel,
+  replyTags,
+  repostTags,
+  verifyNip17Rumor,
+} from "./nostr";
 
 const parent: Event = {
   id: "a".repeat(64),
@@ -40,6 +50,54 @@ describe("Nostr event helpers", () => {
       tags: [["t", "test"]],
     });
     expect(() => eventTemplate("not-a-pubkey", 1, "hello")).toThrow();
+  });
+
+  it("builds NIP-09 deletion references for addressable events", () => {
+    const article = { ...parent, kind: 30023, tags: [["d", "intro"]] };
+    expect(deletionTags(article)).toEqual([
+      ["a", `30023:${article.pubkey}:intro`],
+      ["e", article.id],
+    ]);
+    expect(deletionTags(parent)).toEqual([["e", parent.id]]);
+  });
+
+  it("decodes NIP-19 profile and event identifiers without accepting secret keys", () => {
+    const key = "a".repeat(64);
+    const event = "b".repeat(64);
+    expect(decodeNostrIdentifier(nip19.npubEncode(key))).toEqual({ type: "profile", pubkey: key });
+    expect(decodeNostrIdentifier(nip19.nprofileEncode({ pubkey: key }))).toEqual({
+      type: "profile",
+      pubkey: key,
+    });
+    expect(decodeNostrIdentifier(nip19.noteEncode(event))).toEqual({ type: "event", id: event });
+    expect(
+      decodeNostrIdentifier(nip19.naddrEncode({ identifier: "article", pubkey: key, kind: 30023 })),
+    ).toEqual({
+      type: "address",
+      pubkey: key,
+      kind: 30023,
+      identifier: "article",
+    });
+    expect(decodeNostrIdentifier(nip19.nsecEncode(new Uint8Array(32)))).toBeUndefined();
+  });
+
+  it("validates NIP-17 rumor hashes and recipient tags", () => {
+    const rumorData = {
+      pubkey: "a".repeat(64),
+      created_at: 10,
+      kind: 14,
+      tags: [["p", "b".repeat(64)]],
+      content: "secret",
+    };
+    const rumor: Event = {
+      ...rumorData,
+      id: getEventHash(rumorData),
+      sig: "c".repeat(128),
+    };
+    const seal = { ...parent, kind: 13, pubkey: rumor.pubkey };
+    expect(verifyNip17Rumor(rumor, seal, "b".repeat(64))).toBe(true);
+    expect(verifyNip17Rumor({ ...rumor, content: "forged" }, seal, "b".repeat(64))).toBe(false);
+    expect(verifyNip17Rumor(rumor, seal, "d".repeat(64))).toBe(false);
   });
 
   it("accepts only bounded string profile metadata", () => {

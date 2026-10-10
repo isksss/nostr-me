@@ -74,6 +74,19 @@ test("validates and persists browser relay settings", async ({ page }) => {
   );
 });
 
+test("opens NIP-46 sign-in and the new protocol pages", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "NIP-46", exact: true }).click();
+  await expect(page.getByLabel("NIP-46接続先（bunker:// URLまたはNIP-05）")).toBeVisible();
+
+  await page.getByRole("link", { name: "その他" }).click();
+  await page.getByRole("link", { name: "長文記事" }).click();
+  await expect(page.getByRole("heading", { name: "長文記事" })).toBeVisible();
+  await page.getByRole("link", { name: "その他" }).click();
+  await page.getByRole("link", { name: "ダイレクトメッセージ" }).click();
+  await expect(page.getByRole("heading", { name: "ダイレクトメッセージ" })).toBeVisible();
+});
+
 test("keeps the mobile navigation usable", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");

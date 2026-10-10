@@ -1,3 +1,4 @@
+import { useState, type FormEvent } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useNostr } from "../context/NostrContext";
 import { Avatar } from "./Avatar";
@@ -10,12 +11,36 @@ const navigation: { to: string; label: string; icon: IconName; end?: boolean }[]
   { to: "/notifications", label: "通知", icon: "bell" },
   { to: "/profile", label: "プロフィール", icon: "user" },
   { to: "/settings", label: "設定", icon: "settings" },
+  { to: "/tools", label: "その他", icon: "more" },
 ];
 
 export function AppShell() {
-  const { pubkey, profile, relays, connectedCount, notice, setNotice, connect, disconnect } =
-    useNostr();
+  const {
+    pubkey,
+    profile,
+    relays,
+    connectedCount,
+    notice,
+    setNotice,
+    connect,
+    connectBunker,
+    disconnect,
+    signerKind,
+  } = useNostr();
   const hasExtension = Boolean(window.nostr);
+  const [bunkerOpen, setBunkerOpen] = useState(false);
+  const [bunkerInput, setBunkerInput] = useState("");
+
+  async function submitBunker(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      await connectBunker(bunkerInput);
+      setBunkerOpen(false);
+      setBunkerInput("");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "NIP-46接続に失敗しました。");
+    }
+  }
 
   return (
     <div className="min-h-screen bg-white text-solid-gray-900">
@@ -40,16 +65,48 @@ export function AppShell() {
                 : `${relays.read.length}局へ接続中`}
             </span>
             {pubkey ? (
-              <Button onClick={disconnect} size="sm" variant="outline">
-                ログアウト
-              </Button>
+              <>
+                <span className="hidden text-xs text-solid-gray-600 sm:inline">
+                  {signerKind === "nip46" ? "NIP-46" : "NIP-07"}
+                </span>
+                <Button onClick={disconnect} size="sm" variant="outline">
+                  ログアウト
+                </Button>
+              </>
             ) : (
-              <Button onClick={() => void connect()} size="sm" variant="solid-fill">
-                {hasExtension ? "ログイン" : "NIP-07で接続"}
-              </Button>
+              <>
+                <Button onClick={() => void connect()} size="sm" variant="solid-fill">
+                  {hasExtension ? "ログイン" : "NIP-07で接続"}
+                </Button>
+                <Button onClick={() => setBunkerOpen((open) => !open)} size="sm" variant="outline">
+                  NIP-46
+                </Button>
+              </>
             )}
           </div>
         </div>
+        {bunkerOpen && !pubkey && (
+          <form
+            className="mx-auto flex max-w-[1440px] flex-wrap items-end gap-3 border-t border-solid-gray-300 px-4 py-3 sm:px-6"
+            onSubmit={submitBunker}
+          >
+            <label className="min-w-0 flex-1 text-sm font-bold" htmlFor="bunker-input">
+              NIP-46接続先（bunker:// URLまたはNIP-05）
+              <input
+                autoComplete="off"
+                autoCapitalize="none"
+                className="mt-1 min-h-10 w-full rounded-4 border border-solid-gray-500 px-3 font-normal"
+                id="bunker-input"
+                onChange={(event) => setBunkerInput(event.target.value)}
+                required
+                value={bunkerInput}
+              />
+            </label>
+            <Button disabled={!bunkerInput.trim()} size="sm" type="submit" variant="solid-fill">
+              接続
+            </Button>
+          </form>
+        )}
       </header>
 
       <div className="mx-auto grid max-w-[1440px] grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[240px_minmax(0,680px)_300px]">
@@ -154,7 +211,7 @@ export function AppShell() {
       </div>
 
       <nav
-        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-solid-gray-300 bg-white px-1 pb-[env(safe-area-inset-bottom)] lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-6 border-t border-solid-gray-300 bg-white px-1 pb-[env(safe-area-inset-bottom)] lg:hidden"
         aria-label="メインナビゲーション"
       >
         {navigation.map((item) => (
