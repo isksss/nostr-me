@@ -1,0 +1,53 @@
+@import "tailwindcss";
+@import "@digital-go-jp/tailwind-theme-plugin/v4";
+
+@layer base {
+  :root {
+    color-scheme: light;
+    font-family: "Noto Sans JP", sans-serif;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  html {
+    min-width: 320px;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    min-width: 320px;
+    min-height: 100vh;
+    margin: 0;
+    background: #fff;
+    color: #1a1a1c;
+  }
+
+  button,
+  input,
+  textarea {
+    font: inherit;
+  }
+
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible {
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: #fff2b3;
+    color: #1a1a1c;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

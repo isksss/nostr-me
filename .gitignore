@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.output/
+.dev.vars
+.env
+.env.*
+!.env.example
+.mise.local.toml
+.cloudflare/
+.wrangler/
+playwright-report/
+test-results/
