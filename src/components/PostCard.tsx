@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Event } from "nostr-tools";
 import { verifyEvent } from "nostr-tools/pure";
@@ -33,6 +33,63 @@ function nestedEvent(event: Event): Event | undefined {
 
 function displayName(profile: Profile | undefined, pubkey: string): string {
   return profile?.display_name || profile?.name || publicKeyLabel(pubkey).slice(0, 16);
+}
+
+type XEmbedMessage = {
+  "twttr.embed"?: {
+    method?: string;
+    params?: { height?: number }[];
+  };
+};
+
+function XPostEmbed({ post }: { post: { id: string; url: string } }) {
+  const iframe = useRef<HTMLIFrameElement>(null);
+  const [height, setHeight] = useState(300);
+
+  useEffect(() => {
+    function resize(event: MessageEvent) {
+      const message = (event.data as XEmbedMessage | null)?.["twttr.embed"];
+      const nextHeight = message?.params?.[0]?.height;
+      if (
+        event.origin === "https://platform.twitter.com" &&
+        event.source === iframe.current?.contentWindow &&
+        message?.method === "twttr.private.resize" &&
+        typeof nextHeight === "number" &&
+        Number.isFinite(nextHeight) &&
+        nextHeight >= 120 &&
+        nextHeight <= 3_000
+      ) {
+        setHeight(nextHeight);
+      }
+    }
+
+    window.addEventListener("message", resize);
+    return () => window.removeEventListener("message", resize);
+  }, []);
+
+  return (
+    <div className="my-3 w-full max-w-[550px]">
+      <iframe
+        allowFullScreen
+        className="block w-full rounded-8 border border-solid-gray-300 bg-white"
+        height={height}
+        loading="lazy"
+        ref={iframe}
+        referrerPolicy="no-referrer"
+        src={`https://platform.twitter.com/embed/Tweet.html?id=${post.id}&lang=ja&dnt=true`}
+        title="Xの投稿"
+        width={550}
+      />
+      <a
+        className="mt-1 inline-block min-h-11 text-sm text-key-1000 underline"
+        href={post.url}
+        rel="noopener noreferrer"
+        target="_blank"
+      >
+        Xで投稿を開く（別タブ）
+      </a>
+    </div>
+  );
 }
 
 type PostReactionSummary = ReactionSummary & { eventId: string; pubkey: string | null };
@@ -183,6 +240,8 @@ export function PostCard({ event, full = false }: { event: Event; full?: boolean
                   referrerPolicy="no-referrer"
                   src={part.image}
                 />
+              ) : "xPost" in part ? (
+                <XPostEmbed key={index} post={part.xPost} />
               ) : (
                 <span key={index}>{part.text}</span>
               ),

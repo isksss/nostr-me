@@ -1,12 +1,22 @@
-export type PostContentPart = { text: string } | { image: string };
+export type PostContentPart =
+  | { text: string }
+  | { image: string }
+  | { xPost: { id: string; url: string } };
 
 const IMAGE_PATH = /\.(?:avif|gif|jpe?g|png|webp)$/i;
-const IMAGE_URL = /https:\/\/[^\s<>"']+/gi;
+const CONTENT_URL = /https?:\/\/[^\s<>"']+/gi;
 const TRAILING_PUNCTUATION = /[.,!?;:)\]}，。！？、）】」』]+$/u;
+const X_HOSTS = new Set([
+  "x.com",
+  "www.x.com",
+  "twitter.com",
+  "www.twitter.com",
+  "mobile.twitter.com",
+]);
 
 function imageSource(value: string): string | undefined {
   try {
-    const url = new URL(value.replace(TRAILING_PUNCTUATION, ""));
+    const url = new URL(value);
     return url.protocol === "https:" &&
       !url.username &&
       !url.password &&
@@ -18,21 +28,37 @@ function imageSource(value: string): string | undefined {
   }
 }
 
-// shortcut: only extension-addressed HTTPS images render; add media metadata detection for extensionless hosts.
+function xPostSource(value: string): { id: string; url: string } | undefined {
+  try {
+    const url = new URL(value);
+    const id = url.pathname.match(/\/status\/(\d{1,30})(?:\/|$)/i)?.[1];
+    return url.protocol === "https:" &&
+      !url.username &&
+      !url.password &&
+      X_HOSTS.has(url.hostname.toLowerCase()) &&
+      id
+      ? { id, url: `https://x.com/i/status/${id}` }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// shortcut: images need extensions and X links must be direct status URLs; add metadata and t.co support if needed.
 export function splitPostContent(content: string): PostContentPart[] {
   const parts: PostContentPart[] = [];
   let cursor = 0;
 
-  for (const match of content.matchAll(IMAGE_URL)) {
-    const source = imageSource(match[0]);
-    if (!source || match.index === undefined) continue;
+  for (const match of content.matchAll(CONTENT_URL)) {
+    const url = match[0].replace(TRAILING_PUNCTUATION, "");
+    const image = imageSource(url);
+    const xPost = image ? undefined : xPostSource(url);
+    const part = image ? { image } : xPost ? { xPost } : undefined;
+    if (!part || match.index === undefined) continue;
 
-    const matchEnd = match.index + match[0].length;
-    const punctuation = match[0].match(TRAILING_PUNCTUATION)?.[0] ?? "";
-    const imageEnd = matchEnd - punctuation.length;
     if (match.index > cursor) parts.push({ text: content.slice(cursor, match.index) });
-    parts.push({ image: source });
-    cursor = imageEnd;
+    parts.push(part);
+    cursor = match.index + url.length;
   }
 
   if (cursor < content.length) parts.push({ text: content.slice(cursor) });

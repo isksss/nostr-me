@@ -122,6 +122,38 @@ test("renders HTTPS images inline in posts", async ({ page }) => {
   );
 });
 
+test("renders X and Twitter status links as inline embeds", async ({ page }) => {
+  const id = "1234567890123456789";
+  const post = finalizeEvent(
+    {
+      kind: 1,
+      created_at: Math.floor(Date.now() / 1_000),
+      tags: [],
+      content: `X post: https://x.com/example/status/${id}`,
+    },
+    generateSecretKey(),
+  );
+  await mockRelays(page, [post]);
+  await page.route("https://platform.twitter.com/**", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: `<script>parent.postMessage({"twttr.embed":{"method":"twttr.private.resize","params":[{"height":321}]}},"*")</script>`,
+    }),
+  );
+  await page.goto("/");
+
+  const embed = page.getByTitle("Xの投稿");
+  await expect(embed).toHaveAttribute(
+    "src",
+    `https://platform.twitter.com/embed/Tweet.html?id=${id}&lang=ja&dnt=true`,
+  );
+  await expect(embed).toHaveAttribute("height", "321");
+  await expect(page.getByRole("link", { name: "Xで投稿を開く（別タブ）" })).toHaveAttribute(
+    "href",
+    `https://x.com/i/status/${id}`,
+  );
+});
+
 test("keeps the mobile navigation usable", async ({ page }) => {
   await mockRelays(page);
   await page.setViewportSize({ width: 390, height: 844 });
