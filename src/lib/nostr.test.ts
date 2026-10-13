@@ -9,6 +9,7 @@ import {
   publicKeyLabel,
   replyTags,
   repostTags,
+  summarizeReactions,
   verifyNip17Rumor,
 } from "./nostr";
 
@@ -41,6 +42,20 @@ describe("Nostr event helpers", () => {
       ["e", "a".repeat(64), "", "mention"],
       ["p", "b".repeat(64)],
     ]);
+  });
+
+  it("counts reactions and identifies an existing reaction from the connected account", () => {
+    const reactions: Event[] = [
+      { ...parent, id: "1".repeat(64), kind: 7, content: "👍" },
+      { ...parent, id: "2".repeat(64), pubkey: "c".repeat(64), kind: 7, content: "💜" },
+      { ...parent, id: "3".repeat(64), pubkey: "d".repeat(64), kind: 7, content: "👍" },
+    ];
+
+    expect(summarizeReactions(reactions, parent.pubkey)).toEqual({
+      counts: { "👍": 2, "💜": 1 },
+      reacted: true,
+    });
+    expect(summarizeReactions(reactions, "e".repeat(64)).reacted).toBe(false);
   });
 
   it("builds a NIP-01 event template with validated public keys", () => {

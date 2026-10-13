@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Event } from "nostr-tools";
 import { verifyEvent } from "nostr-tools/pure";
 import { useNostr } from "../context/NostrContext";
-import { publicKeyLabel, type Profile } from "../lib/nostr";
+import { publicKeyLabel, type Profile, type ReactionSummary } from "../lib/nostr";
+import { splitPostContent } from "../lib/postContent";
 import { Avatar } from "./Avatar";
 import { Button } from "./dads/Button/Button";
 import { Textarea } from "./dads/Textarea/Textarea";
@@ -34,6 +35,8 @@ function displayName(profile: Profile | undefined, pubkey: string): string {
   return profile?.display_name || profile?.name || publicKeyLabel(pubkey).slice(0, 16);
 }
 
+type PostReactionSummary = ReactionSummary & { eventId: string; pubkey: string | null };
+
 export function PostCard({ event, full = false }: { event: Event; full?: boolean }) {
   const {
     pubkey,
@@ -44,15 +47,16 @@ export function PostCard({ event, full = false }: { event: Event; full?: boolean
     deletePost,
     reportPost,
     loadReplies,
-    reactionCounts,
+    reactionSummary,
     setNotice,
   } = useNostr();
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyText, setReplyText] = useState("");
   const [threadOpen, setThreadOpen] = useState(false);
   const [thread, setThread] = useState<Event[]>([]);
-  const [counts, setCounts] = useState<Record<string, number>>({});
-  const [countsLoaded, setCountsLoaded] = useState(false);
+  const [reactionState, setReactionState] = useState<PostReactionSummary>();
+  const [reactionLoadError, setReactionLoadError] = useState(false);
+  const [reacting, setReacting] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportCategory, setReportCategory] = useState("spam");
   const [deleted, setDeleted] = useState(false);
@@ -60,6 +64,29 @@ export function PostCard({ event, full = false }: { event: Event; full?: boolean
   const post = reposted ?? event;
   const author = profiles[post.pubkey];
   const repostAuthor = reposted ? profiles[event.pubkey] : undefined;
+  const reactions =
+    reactionState?.eventId === post.id && reactionState.pubkey === pubkey
+      ? reactionState
+      : undefined;
+
+  useEffect(() => {
+    let active = true;
+    setReactionState(undefined);
+    setReactionLoadError(false);
+    void reactionSummary(post.id)
+      .then((summary) => {
+        if (active) setReactionState({ ...summary, eventId: post.id, pubkey });
+      })
+      .catch(() => {
+        if (active) {
+          setReactionLoadError(true);
+          setNotice("リアクションを読み込めませんでした。");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [post.id, pubkey, reactionSummary, setNotice]);
 
   async function submitReply(eventForm: React.FormEvent<HTMLFormElement>) {
     eventForm.preventDefault();
@@ -78,6 +105,27 @@ export function PostCard({ event, full = false }: { event: Event; full?: boolean
       await action();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "操作に失敗しました。");
+    }
+  }
+
+  async function submitReaction() {
+    if (!pubkey || !reactions || reactions.reacted || reacting) return;
+    setReacting(true);
+    try {
+      await react(post);
+      setReactionState((current) =>
+        current?.eventId === post.id && current.pubkey === pubkey
+          ? {
+              ...current,
+              counts: { ...current.counts, "👍": (current.counts["👍"] ?? 0) + 1 },
+              reacted: true,
+            }
+          : current,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "リアクションできませんでした。");
+    } finally {
+      setReacting(false);
     }
   }
 
@@ -120,10 +168,26 @@ export function PostCard({ event, full = false }: { event: Event; full?: boolean
               {post.tags.find((tag) => tag[0] === "title")?.[1] || "タイトルなし"}
             </h2>
           )}
-          <p className="mt-2 whitespace-pre-wrap break-words text-[1rem] leading-7 text-solid-gray-900">
-            {(post.kind === 30023 && !full ? post.content.slice(0, 800) : post.content) ||
-              "（本文なし）"}
-          </p>
+          <div className="mt-2 whitespace-pre-wrap break-words text-[1rem] leading-7 text-solid-gray-900">
+            {splitPostContent(
+              (post.kind === 30023 && !full ? post.content.slice(0, 800) : post.content) ||
+                "（本文なし）",
+            ).map((part, index) =>
+              "image" in part ? (
+                <img
+                  alt="投稿に添付された画像"
+                  className="my-2 block max-h-[32rem] max-w-full rounded-8 object-contain"
+                  decoding="async"
+                  key={index}
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                  src={part.image}
+                />
+              ) : (
+                <span key={index}>{part.text}</span>
+              ),
+            )}
+          </div>
           {post.kind === 30023 && !full && post.content.length > 800 && (
             <Link className="mt-2 inline-block text-key-1000 underline" to={`/event/${post.id}`}>
               記事を読む
@@ -155,41 +219,32 @@ export function PostCard({ event, full = false }: { event: Event; full?: boolean
               返信を見る{thread.length ? ` (${thread.length})` : ""}
             </Button>
             <Button
-              aria-label="いいね"
+              aria-label={reactions?.reacted ? "リアクション済み" : "👍でリアクション"}
               className="gap-2 !min-w-0 !px-2"
-              disabled={!pubkey}
-              onClick={() => void handleAction(() => react(post))}
+              disabled={!pubkey || !reactions || reactions.reacted || reacting}
+              onClick={() => void submitReaction()}
               size="xs"
               variant="text"
             >
-              <Icon name="heart" size={18} />
+              <span aria-hidden="true">👍</span>
               <span>
-                {countsLoaded
-                  ? Object.values(counts).reduce((sum, count) => sum + count, 0)
-                  : "いいね"}
+                {reacting ? "送信中" : reactions?.reacted ? "リアクション済み" : "リアクション"}
               </span>
             </Button>
-            <Button
+            <span
               aria-label="リアクション数"
-              className="!min-w-0 !px-2"
-              disabled={countsLoaded}
-              onClick={() =>
-                void reactionCounts(post.id)
-                  .then((next) => {
-                    setCounts(next);
-                    setCountsLoaded(true);
-                  })
-                  .catch(() => setNotice("リアクションを読み込めませんでした。"))
-              }
-              size="xs"
-              variant="text"
+              className="px-2 text-sm"
+              role="group"
+              aria-live="polite"
             >
-              {countsLoaded
-                ? Object.entries(counts)
+              {reactions
+                ? Object.entries(reactions.counts)
                     .map(([emoji, count]) => `${emoji} ${count}`)
                     .join(" · ") || "リアクションなし"
-                : "リアクション数"}
-            </Button>
+                : reactionLoadError
+                  ? "読み込めませんでした"
+                  : "読み込み中"}
+            </span>
             <Button
               aria-label="リポスト"
               className="gap-2 !min-w-0 !px-2"

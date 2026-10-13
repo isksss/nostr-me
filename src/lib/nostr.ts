@@ -76,6 +76,11 @@ export type DirectMessage = {
   peer: string;
 };
 
+export type ReactionSummary = {
+  counts: Record<string, number>;
+  reacted: boolean;
+};
+
 export function parseProfile(content: string): Profile {
   try {
     const value: unknown = JSON.parse(content);
@@ -317,19 +322,32 @@ export async function readReplies(event: Event, relays: string[]): Promise<Event
   );
 }
 
-export async function readReactionCounts(
+export function summarizeReactions(reactions: Event[], pubkey?: string): ReactionSummary {
+  return {
+    counts: reactions.reduce<Record<string, number>>((counts, event) => {
+      const reaction = event.content || "+";
+      counts[reaction] = (counts[reaction] ?? 0) + 1;
+      return counts;
+    }, {}),
+    reacted: Boolean(pubkey && reactions.some((event) => event.pubkey === pubkey)),
+  };
+}
+
+export async function readReactionSummary(
   eventId: string,
   relays: string[],
-): Promise<Record<string, number>> {
-  const reactions = await withoutDeletedEvents(
-    await readEvents(relays, { kinds: [7], "#e": [eventId], limit: 500 }),
-    relays,
+  pubkey?: string,
+): Promise<ReactionSummary> {
+  const [reactions, ownReactions] = await Promise.all([
+    readEvents(relays, { kinds: [7], "#e": [eventId], limit: 500 }),
+    pubkey
+      ? readEvents(relays, { kinds: [7], authors: [pubkey], "#e": [eventId], limit: 1 })
+      : Promise.resolve([]),
+  ]);
+  return summarizeReactions(
+    await withoutDeletedEvents(mergeEvents([...reactions, ...ownReactions]), relays),
+    pubkey,
   );
-  return reactions.reduce<Record<string, number>>((counts, event) => {
-    const reaction = event.content || "+";
-    counts[reaction] = (counts[reaction] ?? 0) + 1;
-    return counts;
-  }, {});
 }
 
 export async function readNotifications(pubkey: string, relays: string[]): Promise<Event[]> {

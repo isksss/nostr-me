@@ -24,7 +24,7 @@ import {
   readNotifications,
   readProfile,
   readProfiles,
-  readReactionCounts,
+  readReactionSummary,
   readReplies,
   readTimeline,
   relayConnectionStatus,
@@ -39,6 +39,7 @@ import {
   type NostrSigner,
   type Profile,
   type PublishResult,
+  type ReactionSummary,
 } from "../lib/nostr";
 import {
   DEFAULT_RELAYS,
@@ -89,7 +90,7 @@ type NostrContextValue = {
     legacy?: boolean,
   ) => Promise<PublishResult>;
   loadReplies: (event: Event) => Promise<Event[]>;
-  reactionCounts: (eventId: string) => Promise<Record<string, number>>;
+  reactionSummary: (eventId: string) => Promise<ReactionSummary>;
   saveRelays: (next: RelaySettings) => Promise<PublishResult | undefined>;
   setNotice: (message: string) => void;
 };
@@ -396,14 +397,16 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       const result = await signAndPublish(
         pubkey,
         relays.write,
-        eventTemplate(pubkey, 7, "+", [
+        eventTemplate(pubkey, 7, "👍", [
           ["e", event.id],
           ["p", event.pubkey],
         ]),
         signer ?? undefined,
       );
       setNotice(
-        result.failed ? "いいねしました。一部のリレーには届きませんでした。" : "いいねしました。",
+        result.failed
+          ? "リアクションしました。一部のリレーには届きませんでした。"
+          : "リアクションしました。",
       );
       return result;
     },
@@ -559,9 +562,9 @@ export function NostrProvider({ children }: { children: ReactNode }) {
 
   const loadReplies = useCallback((event: Event) => readReplies(event, relays.read), [relays.read]);
 
-  const reactionCounts = useCallback(
-    (eventId: string) => readReactionCounts(eventId, relays.read),
-    [relays.read],
+  const reactionSummary = useCallback(
+    (eventId: string) => readReactionSummary(eventId, relays.read, pubkey ?? undefined),
+    [pubkey, relays.read],
   );
 
   const saveRelays = useCallback(
@@ -644,7 +647,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       loadDirectMessages,
       sendDirectMessage,
       loadReplies,
-      reactionCounts,
+      reactionSummary,
       saveRelays,
       setNotice,
     }),
@@ -669,7 +672,7 @@ export function NostrProvider({ children }: { children: ReactNode }) {
       publish,
       publishArticle,
       react,
-      reactionCounts,
+      reactionSummary,
       reportPost,
       relays,
       reply,

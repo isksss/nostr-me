@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { Event, Filter } from "nostr-tools";
+import { finalizeEvent, generateSecretKey } from "nostr-tools/pure";
 
 const relayPost: Event = {
   kind: 1,
@@ -20,7 +21,7 @@ function matchesFilter(filter: Filter, event: Event): boolean {
   );
 }
 
-async function mockRelays(page: Page) {
+async function mockRelays(page: Page, posts: Event[] = [relayPost]) {
   await page.routeWebSocket(/^wss:\/\/[^/]+/, (socket) => {
     socket.onMessage((message) => {
       const request: unknown = JSON.parse(message.toString());
@@ -28,22 +29,25 @@ async function mockRelays(page: Page) {
 
       const subscriptionId = request[1];
       const filters = request.slice(2) as Filter[];
-      if (filters.some((filter) => matchesFilter(filter, relayPost))) {
-        socket.send(JSON.stringify(["EVENT", subscriptionId, relayPost]));
+      for (const post of posts) {
+        if (filters.some((filter) => matchesFilter(filter, post))) {
+          socket.send(JSON.stringify(["EVENT", subscriptionId, post]));
+        }
       }
       socket.send(JSON.stringify(["EOSE", subscriptionId]));
     });
   });
 }
 
-test.beforeEach(async ({ page }) => {
-  await mockRelays(page);
-});
-
 test("reads the public timeline, searches, and handles a missing signer", async ({ page }) => {
+  await mockRelays(page);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "ホーム" })).toBeVisible();
   await expect(page.getByText(relayPost.content, { exact: true })).toBeVisible();
+  await expect(page.getByRole("group", { name: "リアクション数" })).toContainText(
+    "リアクションなし",
+  );
+  await expect(page.getByRole("button", { name: "👍でリアクション" })).toBeDisabled();
 
   await page.getByRole("link", { name: "検索" }).click();
   await page.getByLabel("ユーザー・投稿を検索").fill("browser timeline works");
@@ -57,6 +61,7 @@ test("reads the public timeline, searches, and handles a missing signer", async 
 });
 
 test("validates and persists browser relay settings", async ({ page }) => {
+  await mockRelays(page);
   await page.goto("/settings");
 
   const readRelays = page.getByLabel("読み込み用リレー（1行に1つ）");
@@ -75,6 +80,7 @@ test("validates and persists browser relay settings", async ({ page }) => {
 });
 
 test("opens NIP-46 sign-in and the new protocol pages", async ({ page }) => {
+  await mockRelays(page);
   await page.goto("/");
   await page.getByRole("button", { name: "NIP-46", exact: true }).click();
   await expect(page.getByLabel("NIP-46接続先（bunker:// URLまたはNIP-05）")).toBeVisible();
@@ -87,7 +93,37 @@ test("opens NIP-46 sign-in and the new protocol pages", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "ダイレクトメッセージ" })).toBeVisible();
 });
 
+test("renders HTTPS images inline in posts", async ({ page }) => {
+  const post = finalizeEvent(
+    {
+      kind: 1,
+      created_at: Math.floor(Date.now() / 1_000),
+      tags: [],
+      content: "Inline image: https://images.example/photo.png",
+    },
+    generateSecretKey(),
+  );
+  await mockRelays(page, [post]);
+  await page.route("https://images.example/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      body: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL+WQAAAABJRU5ErkJggg==",
+        "base64",
+      ),
+    }),
+  );
+  await page.goto("/");
+
+  await expect(page.getByRole("img", { name: "投稿に添付された画像" })).toHaveAttribute(
+    "src",
+    "https://images.example/photo.png",
+  );
+});
+
 test("keeps the mobile navigation usable", async ({ page }) => {
+  await mockRelays(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
 
