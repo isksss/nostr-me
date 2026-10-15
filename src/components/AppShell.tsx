@@ -3,6 +3,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useNostr } from "../context/NostrContext";
 import { Avatar } from "./Avatar";
 import { Button } from "./dads/Button/Button";
+import { Input } from "./dads/Input/Input";
 import { Icon, type IconName } from "./Icon";
 
 const navigation: { to: string; label: string; icon: IconName; end?: boolean }[] = [
@@ -78,7 +79,12 @@ export function AppShell() {
                 <Button onClick={() => void connect()} size="sm" variant="solid-fill">
                   {hasExtension ? "ログイン" : "NIP-07で接続"}
                 </Button>
-                <Button onClick={() => setBunkerOpen((open) => !open)} size="sm" variant="outline">
+                <Button
+                  aria-expanded={bunkerOpen}
+                  onClick={() => setBunkerOpen((open) => !open)}
+                  size="sm"
+                  variant="outline"
+                >
                   NIP-46
                 </Button>
               </>
@@ -92,10 +98,11 @@ export function AppShell() {
           >
             <label className="min-w-0 flex-1 text-sm font-bold" htmlFor="bunker-input">
               NIP-46接続先（bunker:// URLまたはNIP-05）
-              <input
+              <Input
                 autoComplete="off"
                 autoCapitalize="none"
-                className="mt-1 min-h-10 w-full rounded-4 border border-solid-gray-500 px-3 font-normal"
+                blockSize="md"
+                className="mt-1 w-full font-normal"
                 id="bunker-input"
                 onChange={(event) => setBunkerInput(event.target.value)}
                 required
@@ -211,14 +218,14 @@ export function AppShell() {
       </div>
 
       <nav
-        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-6 border-t border-solid-gray-300 bg-white px-1 pb-[env(safe-area-inset-bottom)] lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 flex justify-around border-t border-solid-gray-300 bg-white px-1 pb-[env(safe-area-inset-bottom)] lg:hidden"
         aria-label="メインナビゲーション"
       >
         {navigation.map((item) => (
           <NavLink
             aria-label={item.label}
             className={({ isActive }) =>
-              `flex min-h-14 flex-col items-center justify-center gap-1 text-xs focus-visible:outline focus-visible:outline-4 focus-visible:outline-black focus-visible:ring-2 focus-visible:ring-yellow-300 ${isActive ? "font-bold text-key-1000" : "text-solid-gray-700"}`
+              `flex min-h-14 flex-col items-center justify-center gap-1 whitespace-nowrap px-1 text-sm focus-visible:outline focus-visible:outline-4 focus-visible:outline-black focus-visible:ring-2 focus-visible:ring-yellow-300 ${isActive ? "font-bold text-key-1000" : "text-solid-gray-700"}`
             }
             end={item.end}
             key={item.to}

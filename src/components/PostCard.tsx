@@ -115,6 +115,7 @@ export function PostCard({ event, full = false }: { event: Event; full?: boolean
   const [reactionLoadError, setReactionLoadError] = useState(false);
   const [reacting, setReacting] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [reportCategory, setReportCategory] = useState("spam");
   const [deleted, setDeleted] = useState(false);
   const reposted = nestedEvent(event);
@@ -252,8 +253,13 @@ export function PostCard({ event, full = false }: { event: Event; full?: boolean
               記事を読む
             </Link>
           )}
-          <div className="mt-3 flex flex-wrap gap-x-2 gap-y-1" aria-label="投稿への操作">
+          <div
+            className="mt-3 flex flex-wrap gap-x-2 gap-y-1"
+            role="group"
+            aria-label="投稿への操作"
+          >
             <Button
+              aria-expanded={replyOpen}
               aria-label="返信"
               className="gap-2 !min-w-0 !px-2"
               onClick={() => setReplyOpen((open) => !open)}
@@ -264,6 +270,7 @@ export function PostCard({ event, full = false }: { event: Event; full?: boolean
               <span>返信</span>
             </Button>
             <Button
+              aria-expanded={threadOpen}
               className="!min-w-0 !px-2"
               onClick={() => {
                 setThreadOpen((open) => !open);
@@ -278,7 +285,6 @@ export function PostCard({ event, full = false }: { event: Event; full?: boolean
               返信を見る{thread.length ? ` (${thread.length})` : ""}
             </Button>
             <Button
-              aria-label={reactions?.reacted ? "リアクション済み" : "👍でリアクション"}
               className="gap-2 !min-w-0 !px-2"
               disabled={!pubkey || !reactions || reactions.reacted || reacting}
               onClick={() => void submitReaction()}
@@ -290,12 +296,7 @@ export function PostCard({ event, full = false }: { event: Event; full?: boolean
                 {reacting ? "送信中" : reactions?.reacted ? "リアクション済み" : "リアクション"}
               </span>
             </Button>
-            <span
-              aria-label="リアクション数"
-              className="px-2 text-sm"
-              role="group"
-              aria-live="polite"
-            >
+            <span aria-label="リアクション数" className="px-2 text-sm" role="group">
               {reactions
                 ? Object.entries(reactions.counts)
                     .map(([emoji, count]) => `${emoji} ${count}`)
@@ -317,24 +318,9 @@ export function PostCard({ event, full = false }: { event: Event; full?: boolean
             </Button>
             {pubkey === post.pubkey && (
               <Button
+                aria-expanded={deleteOpen}
                 className="!min-w-0 !px-2"
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      "この投稿の削除リクエストを公開します。リレー上の削除は保証されません。続けますか？",
-                    )
-                  ) {
-                    void deletePost(post)
-                      .then(() => setDeleted(true))
-                      .catch((error) =>
-                        setNotice(
-                          error instanceof Error
-                            ? error.message
-                            : "削除リクエストを送れませんでした。",
-                        ),
-                      );
-                  }
-                }}
+                onClick={() => setDeleteOpen((open) => !open)}
                 size="xs"
                 variant="text"
               >
@@ -342,6 +328,7 @@ export function PostCard({ event, full = false }: { event: Event; full?: boolean
               </Button>
             )}
             <Button
+              aria-expanded={reportOpen}
               className="!min-w-0 !px-2"
               onClick={() => setReportOpen((open) => !open)}
               size="xs"
@@ -350,6 +337,34 @@ export function PostCard({ event, full = false }: { event: Event; full?: boolean
               報告
             </Button>
           </div>
+          {deleteOpen && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+              <p className="basis-full leading-6">
+                この投稿の削除リクエストを公開します。リレー上の削除は保証されません。
+              </p>
+              <Button
+                onClick={() => {
+                  setDeleteOpen(false);
+                  void deletePost(post)
+                    .then(() => setDeleted(true))
+                    .catch((error) =>
+                      setNotice(
+                        error instanceof Error
+                          ? error.message
+                          : "削除リクエストを送れませんでした。",
+                      ),
+                    );
+                }}
+                size="sm"
+                variant="outline"
+              >
+                削除リクエストを公開
+              </Button>
+              <Button onClick={() => setDeleteOpen(false)} size="sm" variant="text">
+                キャンセル
+              </Button>
+            </div>
+          )}
           {reportOpen && (
             <form
               className="mt-3 flex flex-wrap items-center gap-2"
@@ -390,7 +405,11 @@ export function PostCard({ event, full = false }: { event: Event; full?: boolean
             </form>
           )}
           {threadOpen && (
-            <div className="mt-3 border-l-2 border-solid-gray-300 pl-3" aria-label="返信一覧">
+            <div
+              className="mt-3 border-l-2 border-solid-gray-300 pl-3"
+              role="region"
+              aria-label="返信一覧"
+            >
               {thread.length ? (
                 thread.map((item) => (
                   <p
